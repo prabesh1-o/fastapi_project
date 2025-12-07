@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Task Manager — Frontend</title>
+<style>
+  :root { --bg:#0f0f12; --card:#151515; --accent:#00eaff; --muted:#99dbe8; }
+  html,body { height:100%; margin:0; font-family:Inter,Arial,Helvetica,sans-serif; background:var(--bg); color:#fff; }
+  .container { width:95%; max-width:1200px; margin:24px auto; min-height:86vh; display:flex; align-items:flex-start; }
+  .panel { width:100%; background:#161616; border-radius:12px; padding:20px; box-shadow:0 8px 40px rgba(0,0,0,0.6); }
+
+  /* AUTH CARD */
+  #auth { max-width:360px; margin:50px auto; background:linear-gradient(180deg,#151515,#1b1b1b); padding:18px; border-radius:12px; box-shadow:0 8px 30px rgba(0,230,255,0.04); }
+  #auth h2 { margin:0 0 12px 0; color:var(--accent); font-weight:600; text-align:center; }
+  .field { width:100%; padding:10px 12px; margin:8px 0; border-radius:10px; background:#0f1011; border:1px solid rgba(255,255,255,0.04); color:#fff; }
+  .btn { width:100%; padding:10px; margin-top:8px; border-radius:10px; border:none; cursor:pointer; font-weight:700; color:#001; background:var(--accent); }
+  /* .muted { color:var(--muted); font-size:13px; margin-top:8px; text-align:center; } */
+
+  /* Dashboard layout */
+  #dashHeader { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  #dashHeader h2 { margin:0; font-size:20px; }
+  .small { padding:8px 10px; border-radius:8px; cursor:pointer; border:none; }
+  .logout { background:#ff385c; color:#fff; }
+
+  .layout { display:flex; gap:20px; margin-top:16px; height:68vh; }
+  .left { flex:1; background:var(--card); padding:16px; border-radius:10px; display:flex; flex-direction:column; gap:8px; }
+  .right { flex:2; display:flex; gap:12px; }
+  .card { flex:1; background:var(--card); padding:12px; border-radius:10px; overflow:auto; }
+  .card h3 { margin:0 0 8px 0; }
+
+  table { width:100%; border-collapse:collapse; }
+  tr:not(:last-child) td { border-bottom:1px solid rgba(255,255,255,0.03); }
+  td { padding:8px 6px; vertical-align:middle; }
+
+  .smallbtn { padding:6px 10px; border-radius:8px; border:none; cursor:pointer; font-weight:600; }
+  .progress { background:#ff9800; color:#051208; }
+  .done { background:#4caf50; color:#042205; }
+  .del { background:#f44336; color:#fff; }
+
+  #status { max-width:1100px; margin:12px auto 0; padding:10px; background:#0d1518; border-radius:8px; color:#cfefff; font-size:13px; display:none; white-space:pre-wrap; }
+
+  /* responsive */
+  @media (max-width:880px) {
+    .layout { flex-direction:column; height:auto; }
+    #auth { margin:30px 12px; }
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="panel">
+
+      <!-- AUTH -->
+      <div id="auth" aria-live="polite">
+        <h2>Register & Login</h2>
+
+        <input id="reg-email" class="field" placeholder="Email (register)" type="email" />
+        <input id="reg-pass" class="field" placeholder="Password (register)" type="password" />
+        <button class="btn" onclick="handleRegister()">Register</button>
+
+        <div style="height:8px"></div>
+
+        <input id="log-email" class="field" placeholder="Email (login)" type="email" />
+        <input id="log-pass" class="field" placeholder="Password (login)" type="password" />
+        <button class="btn" onclick="handleLogin()">Login</button>
+
+        <!-- <div class="muted">Open DevTools → Network / Console to inspect requests. Status messages appear below.</div> -->
+      </div>
+
+      <!-- STATUS -->
+      <div id="status" role="status"></div>
+
+      <!-- DASHBOARD -->
+      <div id="dash" style="display:none;">
+        <div id="dashHeader">
+          <h2>Task Manager</h2>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="small logout" onclick="doLogout()">Logout</button>
+          </div>
+        </div>
+
+        <div class="layout">
+          <div class="left">
+            <h3>Create Task</h3>
+            <input id="task-title" class="field" placeholder="Title" />
+            <input id="task-desc" class="field" placeholder="Description (optional)" />
+            <button class="btn" onclick="createTask()">Add Task</button>
+            <div style="margin-top:6px; font-size:13px; color:var(--muted);">
+              Tip: After create, the lists will refresh automatically.
+            </div>
+          </div>
+
+          <div class="right">
+            <div class="card">
+              <h3>Todo</h3>
+              <table id="todo"></table>
+            </div>
+            <div class="card">
+              <h3>Progress</h3>
+              <table id="progress"></table>
+            </div>
+            <div class="card">
+              <h3>Completed</h3>
+              <table id="done"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+/*
+  Frontend that matches your working backend.
+  - Uses /users/register and /users/login
+  - Expects login to return { access_token: "..." }
+  - Uses /tasks/ endpoints like your original UI
+*/
+
+const API = "http://localhost:8000"; 
+
+// show status messages (and log)
+function showStatus(msg, isError=false, autoHide=8000) {
+  const el = document.getElementById('status');
+  el.style.display = 'block';
+  el.style.background = isError ? '#3b1216' : '#071318';
+  el.textContent = msg;
+  console.log('STATUS:', msg);
+  if (autoHide) {
+    clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(()=>{ el.style.display='none'; }, autoHide);
+  }
+}
+
+// read response body as JSON or text
+async function readResponseBody(res) {
+  const ct = res.headers.get('content-type') || '';
+  try {
+    if (ct.includes('application/json')) return await res.json();
+    return await res.text();
+  } catch(e) {
+    return '<unreadable body>';
+  }
+}
+// it safely reads api response.if json ->parse json if not read as text
+//avoids exception if the server send plain text or invalid json and retuyrn somethings understandable for status message
+
+
+
+
+
+
+// AUTH UI & history helpers so Back button works predictably
+function showAuth() {
+  document.getElementById('auth').style.display = 'block';
+  document.getElementById('dash').style.display = 'none';
+  // reflect state so browser back/forward will show correct UI
+  history.replaceState({view:'auth'}, '', '');
+}
+
+function showDashboard() {
+  document.getElementById('auth').style.display = 'none';
+  document.getElementById('dash').style.display = 'block';
+  loadAll(); // refresh data
+  history.replaceState({view:'dash'}, '', '');
+}
+
+// When user navigates via browser back/forward, keep UI consistent
+window.addEventListener('popstate', (ev) => {
+  // If token exists but state asks for auth, show dashboard; else show auth.
+  const token = localStorage.getItem('token');
+  if (token) showDashboard();
+  else showAuth();
+});
+
+// initial auth check on page load
+(function init() {
+  const token = localStorage.getItem('token'); // it checks if token exist or not to stay logged in
+  if (token) showDashboard();
+  else showAuth();
+})();
+// keep users logged in across page refresher
+
+
+
+// ---------- REGISTER ----------
+async function handleRegister() {
+  const email = document.getElementById('reg-email').value.trim();
+  const password = document.getElementById('reg-pass').value;
+  if (!email || !password) { showStatus('Enter email and password to register', true); return; }
+
+  try {
+    const res = await fetch(`${API}/users/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+
+    const body = await readResponseBody(res);
+    if (!res.ok) {
+      showStatus(`Register failed (${res.status}): ${JSON.stringify(body)}`, true);
+      console.error('Register failed', res, body);
+      return;
+    }
+
+    // Some backends return the created user, others may auto-login and return token.
+    showStatus(`Registered OK (${res.status}). Server returned: ${JSON.stringify(body)}`, false, 6000);
+    console.log('register response', body);
+
+    // If backend returns access_token directly after register, store and go to dash.
+    if (body && body.access_token) {
+      localStorage.setItem('token', body.access_token);
+      showDashboard();
+      return;
+    }
+
+    // otherwise encourage user to login
+    showStatus('Registration succeeded. Now please login.', false, 7000);
+  } catch (err) {
+    console.error('register error', err);
+    showStatus('Register request failed: ' + err.message, true, 10000);
+  }
+}
+
+// ---------- LOGIN ----------
+async function handleLogin() {
+  const email = document.getElementById('log-email').value.trim();
+  const password = document.getElementById('log-pass').value;
+  if (!email || !password) { showStatus('Enter email and password to login', true); return; }
+
+  try {
+    const res = await fetch(`${API}/users/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+
+    const body = await readResponseBody(res);
+    if (!res.ok) {
+      showStatus(`Login failed (${res.status}): ${JSON.stringify(body)}`, true);
+      console.error('Login failed', res, body);
+      return;
+    }
+
+    // expecting { access_token: "..." }
+    if (body && body.access_token) {
+      localStorage.setItem('token', body.access_token);
+      showStatus('Login successful — opening dashboard', false, 3000);
+      showDashboard();
+    } else {
+      // If your backend returns token under another key, adapt here.
+      showStatus(`Login succeeded but server didn't return access_token. Server returned: ${JSON.stringify(body)}`, true, 10000);
+      console.warn('Login response had no access_token', body);
+    }
+  } catch (err) {
+    console.error('login error', err);
+    showStatus('Login request failed: ' + err.message, true, 10000);
+  }
+}
+
+// ---------- LOGOUT ----------
+function doLogout() {
+  localStorage.removeItem('token');
+  showStatus('Logged out', false, 2000);
+  showAuth();
+}
+// end session on client side
+
+
+
+// ---------- TASKS (CRUD) ----------
+async function createTask() {
+  const title = document.getElementById('task-title').value.trim();
+  const description = document.getElementById('task-desc').value.trim();
+  if (!title) { showStatus('Task title required', true); return; }
+
+  const token = localStorage.getItem('token');
+  if (!token) { showStatus('You must be logged in', true); showAuth(); return; }
+
+  try {
+    const res = await fetch(`${API}/tasks/`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer ' + token },
+      body: JSON.stringify({ title, description })
+    });
+    const body = await readResponseBody(res);
+    if (!res.ok) {
+      showStatus(`Create task failed (${res.status}) ${JSON.stringify(body)}`, true);
+      console.error('createTask failed', res, body);
+      return;
+    }
+    showStatus('Task created', false, 2000);
+    loadAll();
+    document.getElementById('task-title').value = '';
+    document.getElementById('task-desc').value = '';
+  } catch (err) {
+    console.error('createTask err', err);
+    showStatus('Create task request failed: ' + err.message, true);
+  }
+}
+
+function loadAll() {
+  loadList('todo');
+  loadList('progress');
+ 
+  loadList('completed');
+}
+
+async function loadList(type) {
+  const token = localStorage.getItem('token');
+  if (!token) return;
+  try {
+    const res = await fetch(`${API}/tasks/${type}`, {
+      headers: { 'Authorization':'Bearer ' + token }
+    });
+    const body = await readResponseBody(res);
+    if (!res.ok) {
+      showStatus(`Load ${type} failed (${res.status}): ${JSON.stringify(body)}`, true);
+      console.error('loadList failed', type, res, body);
+      return;
+    }
+    renderList(type, Array.isArray(body) ? body : []);
+  } catch (err) {
+    console.error('loadList err', err);
+    showStatus('Load request failed: ' + err.message, true);
+  }
+}
+
+function renderList(type, items) {
+  const table = document.getElementById(type === 'completed' ? 'done' : type);
+  if (!table) return;
+  table.innerHTML = '';
+  if (!items.length) { table.innerHTML = '<tr><td style="color:var(--muted); padding:6px;">No tasks</td></tr>'; return; }
+
+  items.forEach(t => {
+    const row = document.createElement('tr');
+    const titleCell = document.createElement('td');
+    titleCell.textContent = t.title || '(no title)';
+    const actionsCell = document.createElement('td');
+
+    let btnHtml = '';
+    if (type === 'todo') {
+      btnHtml = `<button class="smallbtn progress" onclick="updateStatus(${t.id}, 'progress')">Progress</button>`;
+    } else if (type === 'progress') {
+      btnHtml = `<button class="smallbtn done" onclick="updateStatus(${t.id}, 'done')">Done</button>`;
+    } else {
+      btnHtml = `<button class="smallbtn del" onclick="deleteTask(${t.id})">Delete</button>`;
+    }
+    actionsCell.innerHTML = btnHtml;
+    row.appendChild(titleCell);
+    row.appendChild(actionsCell);
+    table.appendChild(row);
+  });
+}
+
+async function updateStatus(id, status) {
+  const token = localStorage.getItem('token');
+  if (!token) { showStatus('Not authenticated', true); return; }
+
+  try {
+    const res = await fetch(`${API}/tasks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer ' + token },
+      body: JSON.stringify({ status })
+    });
+    const body = await readResponseBody(res);
+    if (!res.ok) {
+      showStatus(`Update failed (${res.status}) ${JSON.stringify(body)}`, true);
+      console.error('updateStatus failed', res, body);
+      return;
+    }
+    showStatus('Updated', false, 1500);
+    loadAll();
+  } catch (err) {
+    console.error('updateStatus err', err);
+    showStatus('Update request failed: ' + err.message, true);
+  }
+}
+
+async function deleteTask(id) {
+  const token = localStorage.getItem('token');
+  if (!token) { showStatus('Not authenticated', true); return; }
+
+  try {
+    const res = await fetch(`${API}/tasks/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization':'Bearer ' + token }
+    });
+    const body = await readResponseBody(res);
+    if (!res.ok) {
+      showStatus(`Delete failed (${res.status}) ${JSON.stringify(body)}`, true);
+      console.error('delete failed', res, body);
+      return;
+    }
+    showStatus('Deleted', false, 1200);
+    loadAll();
+  } catch (err) {
+    console.error('delete err', err);
+    showStatus('Delete request failed: ' + err.message, true);
+  }
+}
+</script>
+</body>
+</html>
