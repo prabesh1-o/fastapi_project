@@ -19,10 +19,10 @@ app = FastAPI(
 app.include_router(users_router)
 app.include_router(tasks_router)
 
-@app.get("/favicon.ico")
-def favicon():
-    return FileResponse("favicon.ico")
+# @app.get("/favicon.ico")
+# def favicon():
+#     return FileResponse("favicon.ico")
 @app.get("/",response_class=FileResponse)
 def home():
-    return FileResponse("frontend.html")
+    return FileResponse("index.html")
     # return {'message':"task app is running"}
